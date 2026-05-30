@@ -15,9 +15,10 @@
 We train a small decoder-only transformer **from scratch** on self-generated
 semiconductor process sequences, with each process step as a single token. A
 rule validator is wired directly into the evaluation loop so we measure real
-process-logic validity, not just loss. Against a trigram baseline we show the
-transformer reaches ~0.83 held-out token accuracy and produces process-valid
-continuations, while the baseline collapses on unseen families.
+process-logic validity, not just loss. On 450 held-out completion examples the
+transformer more than halves the trigram baseline's normalized edit distance
+(0.22 vs 0.55) and beats it on token accuracy (0.42 vs 0.32); for anomaly
+detection it reaches F1 = 0.96 on labeled data.
 
 ---
 
@@ -72,20 +73,20 @@ See `README.md` for full detail. Core flow:
 pip install -r requirements.txt
 
 # 1. generate data (or use training_data/*.csv)
-python generate_sequences.py --family mosfet --count 5000 --output data/mosfet.csv --seed 1
+python3 generate_sequences.py --family mosfet --count 5000 --output data/mosfet.csv --seed 1
 #    ... igbt seed 2, ic seed 3; held-out with different seeds ...
 
 # 2. build the vocabulary once
-python vocab.py data/*.csv
+python3 vocab.py data/*.csv
 
 # 3. baseline (CPU, the floor to beat)
-python baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
+python3 baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
 
 # 4. train the transformer (GPU, via SLURM on Leonardo)
 sbatch train.slurm
 
 # 5. produce submission files (Task 3 threshold tuned on labeled data)
-python predict.py --ckpt ckpt/model.pt --vocab vocab.json \
+python3 predict.py --ckpt ckpt/model.pt --vocab vocab.json \
     --valid eval_input_valid.csv --anomaly eval_input_anomaly.csv \
     --task3_labeled training_data/MOSFET_variants.csv training_data/IGBT_variants.csv training_data/IC_variants.csv \
     --out submission
@@ -98,36 +99,53 @@ streamlit run streamlit_process_dashboard.py
 
 ## Results
 
-Baseline vs. transformer, held-out (in-distribution):
+**Sequence completion (Task 2), 450 held-out examples, in-distribution**
+(generated with held-out seeds the model never trained on), scored with the same
+metrics as the official `eval_metrics.py`:
 
-| Metric | Trigram baseline | Transformer (baseline cfg, 3.3M) |
+| Metric | Transformer (3.3M) | Trigram baseline |
 | --- | --- | --- |
-| next-step / token accuracy | 0.77 | **0.83** |
-| process-valid continuations | n/a | **~1.0** (validator-checked) |
-| vocab-normalization effect | — | +2pp token acc, −10% val loss |
+| Normalized Edit Distance (lower better) | **0.2218** | 0.5466 |
+| Token accuracy | **0.4201** | 0.3229 |
+| Exact match | 0.0000 | 0.0033 |
 
-OOD (train on two families, evaluate on the unseen third):
+Per-family NED (transformer vs baseline): MOSFET 0.165 / 0.505, IGBT 0.226 / 0.562,
+IC 0.274 / 0.573 — the transformer wins on every family. NED is the main
+completion metric, and the transformer more than halves it. Exact match is ~0 for
+both, as expected for completing 40–60 steps where any single deviation breaks it.
 
-| Metric | Trigram baseline | Transformer |
-| --- | --- | --- |
-| next-step / token accuracy (unseen family) | 0.40 | ~0.47 |
+**Anomaly detection (Task 3):** model-likelihood scoring with a threshold tuned on
+labeled data (never on the eval set) reaches **F1 = 0.958** on our labeled
+validation set. Applied to the official `eval_input_anomaly.csv` (987 sequences),
+it produces `submission/anomaly.csv`.
 
-Submission files (`submission/nextstep.csv`, `completion.csv`, `anomaly.csv`)
-are produced by `predict.py` against the official eval inputs and scored with the
-organizers' `eval_metrics.py`. Training artifacts: `ckpt/model.pt`,
-`metrics.json` (per-epoch loss / token-accuracy / process-logic curve).
+**Next-step / token accuracy (in-distribution held-out):** transformer ~0.83 vs
+trigram 0.77. Top-5 is saturated (~0.99 for both) and is not a discriminating metric.
+
+**Number-normalization ablation:** collapsing `LEVEL N` steps into a shared base
+token plus a `<Nk>` number token improved held-out token accuracy 0.808 → 0.828
+and val loss 0.332 → 0.300, at identical model size.
+
+Submission files (`submission/nextstep.csv`, `completion.csv`, `anomaly.csv`) are
+produced by `predict.py` against the official eval inputs. Training artifacts:
+`ckpt/model.pt`, `metrics.json`.
 
 ---
 
 ## What worked
 
-- **Number normalization** was the single cleanest win: a tokenizer change, not
-  a bigger model, moved held-out token accuracy and loss measurably.
-- **Validator-in-the-loop** gave us a process-logic metric independent of loss —
-  the model reaches ~100% valid continuations on held-out prefixes.
+- **Completion clearly beats the baseline.** On 450 held-out examples the
+  transformer's NED (0.22) is less than half the trigram's (0.55), and it wins on
+  every family. This is our strongest evidence the model learned real continuation
+  logic rather than local frequencies.
+- **Anomaly detection is strong.** F1 = 0.96 on labeled data, with the threshold
+  tuned on labeled examples (never on the eval set).
+- **Number normalization** was a clean, measurable win: a tokenizer change, not a
+  bigger model, moved held-out token accuracy 0.808 → 0.828 and loss 0.332 → 0.300.
+- **Validator-in-the-loop** gave us a process-logic metric independent of loss.
 - **The baseline** kept us honest: it showed next-step top-5 is saturated (~0.99
-  for everyone, not a useful metric) and that completion exact-match is ~0 by
-  the nature of the metric — so we didn't over-read a scary-looking 0.
+  for everyone) and exact-match is ~0 by the metric's nature — so we didn't
+  over-read a scary-looking 0.
 
 ## What didn't work
 

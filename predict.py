@@ -226,16 +226,15 @@ def load_labeled(valid_paths, neg_per_rule=None, seed=0):
 
 def write_task3(model, vocab, rows, device, out_path,
                 strategy="model", threshold=None):
-    effective_strategy = strategy
     if strategy == "model" and threshold is None:
-        if vt is None:
-            raise ValueError(
-                "Task 3 'model' strategy needs a threshold tuned on LABELED data. "
-                "Pass --task3_threshold, or --task3_labeled <valid.csv ...> so it "
-                "can be tuned via tune_threshold(). Refusing to guess from the eval "
-                "set (that silently assumes a fixed anomaly rate).")
-        print("[task3] no threshold supplied; falling back to validator strategy")
-        effective_strategy = "validator"
+        raise ValueError(
+            "Task 3 'model' strategy needs a threshold tuned on LABELED data. "
+            "Pass --task3_labeled <valid.csv ...> (tuned via tune_threshold) or "
+            "an explicit --task3_threshold. Refusing to derive one from the eval "
+            "set, which silently assumes a fixed anomaly rate and corrupts "
+            "precision/recall. To use the rule checker directly, pass "
+            "--task3_strategy validator explicitly.")
+    effective_strategy = strategy
     scores = {}
     if effective_strategy == "model":
         for d in rows:
@@ -300,11 +299,10 @@ def main():
             labeled = load_labeled(args.task3_labeled)
             threshold, f1 = tune_threshold(model, vocab, labeled, device)
             print(f"[task3] tuned threshold = {threshold:.4f}  (labeled F1={f1:.3f})")
-        elif args.task3_strategy == "model" and threshold is None and valid_rows:
-            valid_scores = [seq_nll(model, vocab, d["steps"], d["family"], device)
-                            for d in valid_rows]
-            threshold = max(valid_scores)
-            print(f"[task3] derived threshold from valid eval rows = {threshold:.4f}")
+        # NOTE: no eval-set-derived fallback. If strategy is "model" with no
+        # threshold and no --task3_labeled, write_task3 raises (see below).
+        # Deriving a threshold from the eval set silently assumes an anomaly
+        # rate and corrupts Task-3 precision/recall.
         write_task3(model, vocab, rows, device, outdir / "anomaly.csv",
                     strategy=args.task3_strategy, threshold=threshold)
 

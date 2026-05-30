@@ -162,7 +162,7 @@ def read_valid(path):
 
 def write_submission(model, rows, outdir):
     outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
-    with open(outdir / "task1_nextstep.csv", "w", newline="", encoding="utf-8") as f:
+    with open(outdir / "nextstep.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["EXAMPLE_ID", "RANK_1", "RANK_2", "RANK_3", "RANK_4", "RANK_5"])
         for r in rows:
@@ -172,7 +172,7 @@ def write_submission(model, rows, outdir):
             while len(top) < 5:
                 top.append("")
             w.writerow([r["id"], *top[:5]])
-    with open(outdir / "task2_completion.csv", "w", newline="", encoding="utf-8") as f:
+    with open(outdir / "completion.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["EXAMPLE_ID", "PREDICTED_SEQUENCE"])
         for r in rows:

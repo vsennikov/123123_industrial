@@ -62,7 +62,7 @@ must contain `mosfet`, `igbt`, or `ic`.
 ## Train
 
 ```bash
-python train.py --config baseline \
+python3 train.py --config baseline \
   --data data/mosfet.csv data/igbt.csv data/ic.csv \
   --heldout data/heldout_mosfet.csv data/heldout_igbt.csv data/heldout_ic.csv \
   --vocab vocab.json --out ckpt --epochs 30
@@ -77,7 +77,7 @@ memorization detector.
 ## Baseline (run this first)
 
 ```bash
-python baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
+python3 baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
 ```
 
 Prints the floor (next-step top-1/top-5, completion exact-match). Run the OOD
@@ -87,7 +87,7 @@ is our generalization evidence.
 ## Predict (submission files)
 
 ```bash
-python predict.py --ckpt ckpt/model.pt --vocab vocab.json \
+python3 predict.py --ckpt ckpt/model.pt --vocab vocab.json \
   --valid eval_input_valid.csv --anomaly eval_input_anomaly.csv \
   --task3_labeled training_data/MOSFET_variants.csv training_data/IGBT_variants.csv training_data/IC_variants.csv \
   --out submission
@@ -99,9 +99,9 @@ on our own labeled data, never on the eval set.
 Score with the organizers' script:
 
 ```bash
-python eval_metrics.py --task next-step  --ground-truth <gt> --predictions submission/nextstep.csv
-python eval_metrics.py --task completion --ground-truth <gt> --predictions submission/completion.csv
-python eval_metrics.py --task anomaly    --ground-truth <gt> --predictions submission/anomaly.csv
+python3 eval_metrics.py --task next-step  --ground-truth <gt> --predictions submission/nextstep.csv
+python3 eval_metrics.py --task completion --ground-truth <gt> --predictions submission/completion.csv
+python3 eval_metrics.py --task anomaly    --ground-truth <gt> --predictions submission/anomaly.csv
 ```
 
 ## Interactive demo

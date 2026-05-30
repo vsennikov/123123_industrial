@@ -174,7 +174,7 @@ def main():
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
     outdir = Path(args.out); outdir.mkdir(parents=True, exist_ok=True)
-    log_path = outdir / "metrics.jsonl"
+    log_path = outdir / "metrics.json"
     logf = log_path.open("w")
 
     step = 0
