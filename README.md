@@ -66,6 +66,17 @@ This writes:
 - `completion.csv`
 - `anomaly.csv`
 
+## Quick Run
+
+For a single prompt, use the lightweight runner:
+
+```bash
+python3 run_model.py --ckpt ckpt/model.pt --vocab vocab.json \
+  --family mosfet --steps "STEP A|STEP B"
+```
+
+This prints the top-k next-step candidates and a generated continuation.
+
 ## Baseline
 
 If you want a non-neural baseline for comparison:

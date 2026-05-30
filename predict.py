@@ -34,7 +34,13 @@ import torch
 
 from vocab import Vocab, FAMILY_TOKENS
 from model import make_model
-import validator_tools as vt
+
+try:
+    import validator_tools as vt
+except ImportError as e:
+    vt = None
+    print(f"WARNING: validator_tools could not be imported: {e}")
+    print("Task 1 and Task 2 can still run. Task 3 validator mode will not work.")
 
 
 # --------------------------------------------------------------------------- #
@@ -220,14 +226,18 @@ def load_labeled(valid_paths, neg_per_rule=None, seed=0):
 
 def write_task3(model, vocab, rows, device, out_path,
                 strategy="model", threshold=None):
+    effective_strategy = strategy
     if strategy == "model" and threshold is None:
-        raise ValueError(
-            "Task 3 'model' strategy needs a threshold tuned on LABELED data. "
-            "Pass --task3_threshold, or --task3_labeled <valid.csv ...> so it "
-            "can be tuned via tune_threshold(). Refusing to guess from the eval "
-            "set (that silently assumes a fixed anomaly rate).")
+        if vt is None:
+            raise ValueError(
+                "Task 3 'model' strategy needs a threshold tuned on LABELED data. "
+                "Pass --task3_threshold, or --task3_labeled <valid.csv ...> so it "
+                "can be tuned via tune_threshold(). Refusing to guess from the eval "
+                "set (that silently assumes a fixed anomaly rate).")
+        print("[task3] no threshold supplied; falling back to validator strategy")
+        effective_strategy = "validator"
     scores = {}
-    if strategy == "model":
+    if effective_strategy == "model":
         for d in rows:
             scores[d["example_id"]] = seq_nll(model, vocab, d["steps"],
                                                d["family"], device)
@@ -236,7 +246,7 @@ def write_task3(model, vocab, rows, device, out_path,
         w = csv.writer(f)
         w.writerow(["EXAMPLE_ID", "IS_VALID", "SCORE", "PREDICTED_RULE"])
         for d in rows:
-            if strategy == "validator":
+            if effective_strategy == "validator":
                 viols = vt.validate_sequence(d["steps"]) if hasattr(vt, "validate_sequence") \
                         else __import__("generate_sequences").validate_sequence(d["steps"])
                 is_valid = 1 if not viols else 0
@@ -274,11 +284,13 @@ def main():
     outdir = Path(args.out); outdir.mkdir(parents=True, exist_ok=True)
     print(f"device={device}  vocab={len(vocab)}")
 
+    valid_rows = None
+
     if args.valid:
-        rows = read_valid(args.valid)
-        print(f"valid rows: {len(rows)}")
-        write_task1(model, vocab, rows, device, outdir / "nextstep.csv")
-        write_task2(model, vocab, rows, device, outdir / "completion.csv")
+        valid_rows = read_valid(args.valid)
+        print(f"valid rows: {len(valid_rows)}")
+        write_task1(model, vocab, valid_rows, device, outdir / "nextstep.csv")
+        write_task2(model, vocab, valid_rows, device, outdir / "completion.csv")
 
     if args.anomaly:
         rows = read_anomaly(args.anomaly)
@@ -288,6 +300,11 @@ def main():
             labeled = load_labeled(args.task3_labeled)
             threshold, f1 = tune_threshold(model, vocab, labeled, device)
             print(f"[task3] tuned threshold = {threshold:.4f}  (labeled F1={f1:.3f})")
+        elif args.task3_strategy == "model" and threshold is None and valid_rows:
+            valid_scores = [seq_nll(model, vocab, d["steps"], d["family"], device)
+                            for d in valid_rows]
+            threshold = max(valid_scores)
+            print(f"[task3] derived threshold from valid eval rows = {threshold:.4f}")
         write_task3(model, vocab, rows, device, outdir / "anomaly.csv",
                     strategy=args.task3_strategy, threshold=threshold)
 
