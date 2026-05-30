@@ -11,32 +11,36 @@ See `REPORT.md` for the technical write-up, results, and honest findings.
 
 ```
 .
-├── README.md                  ← this file
-├── REPORT.md                  ← technical report (jury reads this)
-├── LICENSE                    ← MIT
+├── README.md                       ← this file
+├── REPORT.md                       ← technical report (jury reads this)
+├── LICENSE                         ← MIT
 ├── requirements.txt
+├── .gitignore
 │
-├── vocab.py                   ← tokenizer (word-level + number normalization)
-├── model.py                   ← GPT-style model, presets tiny/baseline/large/xl
-├── train.py                   ← training loop + validator-in-the-loop eval
-├── predict.py                 ← writes submission files (nextstep/completion/anomaly)
-├── baseline_ngram.py          ← trigram baseline (the floor to beat)
-├── validator_tools.py         ← validator wrapper + labeled-negative generator
-├── generate_sequences.py      ← organizers' sequence generator + validator
-├── run_model.py               ← quick single-prompt inference
+├── vocab.py                        ← tokenizer (word-level + number normalization)
+├── model.py                        ← GPT-style model, presets tiny/baseline/large/xl
+├── train.py                        ← training loop + validator-in-the-loop eval
+├── predict.py                      ← writes submission files (nextstep/completion/anomaly)
+├── baseline_ngram.py               ← trigram baseline (the floor to beat)
+├── score_local.py                  ← held-out completion scoring, transformer vs baseline
+├── validator_tools.py              ← validator wrapper + labeled-negative generator
+├── generate_sequences.py           ← organizers' sequence generator + validator
+├── run_model.py                    ← quick single-prompt inference
 ├── streamlit_process_dashboard.py  ← interactive demo (baseline vs trained)
 │
-├── train.slurm                ← Leonardo job (1 GPU)
-├── train_ood.slurm            ← Leonardo job (OOD experiment)
+├── train.slurm                     ← Leonardo job (1 GPU)
+├── train_ood.slurm                 ← Leonardo job (OOD experiment)
 │
-├── vocab.json                 ← prebuilt vocabulary (200 tokens)
-├── ckpt/model.pt              ← trained checkpoint
-├── metrics.json               ← per-epoch training metrics
+├── vocab.json                      ← prebuilt vocabulary (200 tokens)
+├── ckpt/model.pt                   ← trained checkpoint
+├── metrics.json                    ← per-epoch training metrics
 │
-├── training_data/             ← pre-generated sequences (MOSFET/IGBT/IC)
-├── eval_input_valid.csv       ← official eval input (Tasks 1 & 2)
-├── eval_input_anomaly.csv     ← official eval input (Task 3)
-└── submission/                ← nextstep.csv, completion.csv, anomaly.csv
+├── training_data/                  ← pre-generated sequences (MOSFET/IGBT/IC variants)
+├── data/                           ← held-out sequences for local scoring
+├── eval_input_valid.csv            ← official eval input (Tasks 1 & 2)
+├── eval_input_anomaly.csv          ← official eval input (Task 3)
+├── submission/                     ← our model: nextstep.csv, completion.csv, anomaly.csv
+└── submission_baseline/            ← trigram baseline outputs (for comparison)
 ```
 
 ## Requirements
@@ -50,8 +54,8 @@ pip install -r requirements.txt
 ```
 
 The core scripts (`train.py`, `predict.py`, `vocab.py`, `model.py`,
-`baseline_ngram.py`, `validator_tools.py`) use only the standard library + torch.
-pandas/plotly/streamlit are needed only for the dashboard.
+`baseline_ngram.py`, `validator_tools.py`, `score_local.py`) use only the
+standard library + torch. pandas/plotly/streamlit are needed only for the dashboard.
 
 ## Data format
 
@@ -68,7 +72,7 @@ python3 train.py --config baseline \
   --vocab vocab.json --out ckpt --epochs 30
 ```
 
-Builds `vocab.json` if missing, trains, logs to `ckpt/metrics.jsonl`, saves
+Builds `vocab.json` if missing, trains, logs to `ckpt/metrics.json`, saves
 `ckpt/model.pt`. On Leonardo: `sbatch train.slurm`.
 
 Held-out files must use **different seeds** than training — they are our
@@ -77,12 +81,23 @@ memorization detector.
 ## Baseline (run this first)
 
 ```bash
-python3 baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
+python3 baseline_ngram.py --train training_data/*.csv --heldout data/heldout_ic.csv
 ```
 
 Prints the floor (next-step top-1/top-5, completion exact-match). Run the OOD
 variant (train on two families, test on the third) to see it collapse — that gap
-is our generalization evidence.
+is part of our generalization analysis.
+
+## Local scoring (transformer vs baseline)
+
+Scores both models on held-out sequences using the same metrics as the official
+`eval_metrics.py` (normalized edit distance, exact match, token accuracy):
+
+```bash
+python3 score_local.py --ckpt ckpt/model.pt --vocab vocab.json \
+  --heldout data/heldout_mosfet.csv data/heldout_igbt.csv data/heldout_ic.csv \
+  --train training_data/MOSFET_variants.csv training_data/IGBT_variants.csv training_data/IC_variants.csv
+```
 
 ## Predict (submission files)
 
@@ -94,9 +109,10 @@ python3 predict.py --ckpt ckpt/model.pt --vocab vocab.json \
 ```
 
 `--task3_labeled` is **required** for anomaly detection — it tunes the threshold
-on our own labeled data, never on the eval set.
+on our own labeled data, never on the eval set. Without it the script stops on
+purpose, rather than guessing a threshold from the eval distribution.
 
-Score with the organizers' script:
+Score with the organizers' script (needs their ground-truth files):
 
 ```bash
 python3 eval_metrics.py --task next-step  --ground-truth <gt> --predictions submission/nextstep.csv
