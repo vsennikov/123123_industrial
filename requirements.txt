@@ -1,0 +1,12 @@
+# Core — training, inference, prediction
+torch>=2.0
+
+# Streamlit dashboard (streamlit_process_dashboard.py)
+streamlit>=1.30
+pandas>=2.0
+plotly>=5.18
+
+# Note: vocab.py, model.py, train.py, predict.py, baseline_ngram.py,
+# validator_tools.py and generate_sequences.py use only the Python standard
+# library plus torch. pandas/plotly/streamlit are required ONLY for the
+# interactive dashboard.

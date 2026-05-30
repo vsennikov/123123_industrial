@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# SLURM logs
+logs/
+slurm-*.out
+
+# Local scratch / large artifacts (keep ckpt/model.pt if you want it in-repo)
+*.tmp
+.DS_Store
+
+# Environment
+.pixi/
+venv/

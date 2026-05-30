@@ -1,94 +1,121 @@
-# Process Logic Transformer
+# Process Logic Transformer — Team 123123 (Industrial AI / Infineon)
 
-This repository trains and evaluates a small decoder-only transformer for semiconductor process sequences. The model learns word-level process steps for the `mosfet`, `igbt`, and `ic` families, then uses a validator-aware evaluation loop to measure whether generated continuations stay process-valid.
+A small decoder-only transformer that learns semiconductor process sequences for
+the `mosfet`, `igbt`, and `ic` families. Each process step is one token. A rule
+validator is wired into evaluation so we measure whether generated continuations
+stay process-valid — not just loss.
 
-## What’s in the repo
+See `REPORT.md` for the technical write-up, results, and honest findings.
 
-- `train.py` trains the transformer, builds or loads `vocab.json`, and writes checkpoints plus `metrics.jsonl`.
-- `predict.py` loads a trained checkpoint and writes submission files for next-step prediction, sequence completion, and anomaly scoring.
-- `model.py` contains the GPT-style model and preset sizes (`tiny`, `baseline`, `large`, `xl`).
-- `generate_sequences.py` generates and validates synthetic process sequences.
-- `validator_tools.py` wraps the validator for full-sequence checks, continuation checks, and negative example generation.
-- `baseline_ngram.py` provides a simple trigram baseline for comparison.
+## Repository layout
+
+```
+.
+├── README.md                  ← this file
+├── REPORT.md                  ← technical report (jury reads this)
+├── LICENSE                    ← MIT
+├── requirements.txt
+│
+├── vocab.py                   ← tokenizer (word-level + number normalization)
+├── model.py                   ← GPT-style model, presets tiny/baseline/large/xl
+├── train.py                   ← training loop + validator-in-the-loop eval
+├── predict.py                 ← writes submission files (nextstep/completion/anomaly)
+├── baseline_ngram.py          ← trigram baseline (the floor to beat)
+├── validator_tools.py         ← validator wrapper + labeled-negative generator
+├── generate_sequences.py      ← organizers' sequence generator + validator
+├── run_model.py               ← quick single-prompt inference
+├── streamlit_process_dashboard.py  ← interactive demo (baseline vs trained)
+│
+├── train.slurm                ← Leonardo job (1 GPU)
+├── train_ood.slurm            ← Leonardo job (OOD experiment)
+│
+├── vocab.json                 ← prebuilt vocabulary (200 tokens)
+├── ckpt/model.pt              ← trained checkpoint
+├── metrics.json               ← per-epoch training metrics
+│
+├── training_data/             ← pre-generated sequences (MOSFET/IGBT/IC)
+├── eval_input_valid.csv       ← official eval input (Tasks 1 & 2)
+├── eval_input_anomaly.csv     ← official eval input (Task 3)
+└── submission/                ← nextstep.csv, completion.csv, anomaly.csv
+```
 
 ## Requirements
 
 - Python 3.10+
-- PyTorch
+- PyTorch (training / inference)
+- pandas, plotly, streamlit (dashboard only)
 
-The scripts use only the standard library plus `torch`.
+```bash
+pip install -r requirements.txt
+```
+
+The core scripts (`train.py`, `predict.py`, `vocab.py`, `model.py`,
+`baseline_ngram.py`, `validator_tools.py`) use only the standard library + torch.
+pandas/plotly/streamlit are needed only for the dashboard.
 
 ## Data format
 
-Training data is expected as CSV files containing sequences in the long format used by `generate_sequences.py` and `train.py`. The scripts infer the product family from the filename, so files should include names such as `mosfet`, `igbt`, or `ic`.
+Long format (`SEQUENCE_ID, STEP`, one row per step), as produced by
+`generate_sequences.py`. The scripts infer the family from the filename, so names
+must contain `mosfet`, `igbt`, or `ic`.
 
 ## Train
-
-Example:
 
 ```bash
 python train.py --config baseline \
   --data data/mosfet.csv data/igbt.csv data/ic.csv \
-  --heldout data/heldout.csv \
-  --out ckpt
+  --heldout data/heldout_mosfet.csv data/heldout_igbt.csv data/heldout_ic.csv \
+  --vocab vocab.json --out ckpt --epochs 30
 ```
 
-This will:
+Builds `vocab.json` if missing, trains, logs to `ckpt/metrics.jsonl`, saves
+`ckpt/model.pt`. On Leonardo: `sbatch train.slurm`.
 
-- build `vocab.json` if it does not already exist,
-- train the transformer,
-- log metrics to `ckpt/metrics.jsonl`,
-- save the checkpoint to `ckpt/model.pt`.
+Held-out files must use **different seeds** than training — they are our
+memorization detector.
 
-Useful flags:
-
-- `--config`: model preset from `model.py`
-- `--epochs`: number of epochs to train
-- `--batch_size`: batch size
-- `--block_size`: maximum context length
-- `--dropout`: dropout rate
-
-## Predict
-
-After training, run inference with the saved checkpoint:
+## Baseline (run this first)
 
 ```bash
-python predict.py --ckpt ckpt/model.pt \
-  --vocab vocab.json \
-  --valid eval_input_valid.csv \
-  --anomaly eval_input_anomaly.csv \
+python baseline_ngram.py --train data/*.csv --heldout data/heldout_ic.csv
+```
+
+Prints the floor (next-step top-1/top-5, completion exact-match). Run the OOD
+variant (train on two families, test on the third) to see it collapse — that gap
+is our generalization evidence.
+
+## Predict (submission files)
+
+```bash
+python predict.py --ckpt ckpt/model.pt --vocab vocab.json \
+  --valid eval_input_valid.csv --anomaly eval_input_anomaly.csv \
+  --task3_labeled training_data/MOSFET_variants.csv training_data/IGBT_variants.csv training_data/IC_variants.csv \
   --out submission
 ```
 
-This writes:
+`--task3_labeled` is **required** for anomaly detection — it tunes the threshold
+on our own labeled data, never on the eval set.
 
-- `nextstep.csv`
-- `completion.csv`
-- `anomaly.csv`
-
-## Quick Run
-
-For a single prompt, use the lightweight runner:
+Score with the organizers' script:
 
 ```bash
-python3 run_model.py --ckpt ckpt/model.pt --vocab vocab.json \
-  --family mosfet --steps "STEP A|STEP B"
+python eval_metrics.py --task next-step  --ground-truth <gt> --predictions submission/nextstep.csv
+python eval_metrics.py --task completion --ground-truth <gt> --predictions submission/completion.csv
+python eval_metrics.py --task anomaly    --ground-truth <gt> --predictions submission/anomaly.csv
 ```
 
-This prints the top-k next-step candidates and a generated continuation.
-
-## Baseline
-
-If you want a non-neural baseline for comparison:
+## Interactive demo
 
 ```bash
-python baseline_ngram.py --train data/mosfet.csv data/igbt.csv data/ic.csv \
-  --valid eval_input_valid.csv \
-  --out submission_baseline
+streamlit run streamlit_process_dashboard.py
 ```
 
-## Notes
+Loads `ckpt/model.pt` + `vocab.json`. Shows next-step prediction, sequence
+completion, and anomaly scoring on a prompt — useful for the baseline-vs-trained
+comparison in the demo video.
 
-- `train.py` logs both standard loss/accuracy and the process-logic continuation metric.
-- `predict.py` expects the official evaluation CSVs from the event, so verify column names against the provided scorer if needed.
-- The repository already includes a sample `model.pt` and `metrics.jsonl`.
+## Notes on running on Leonardo
+
+- Install the environment on a **login node** (compute nodes have no internet).
+- Use `$SCRATCH` for data and checkpoints during the hackathon.
+- `train.slurm` requests 1 GPU under the hackathon reservation.
